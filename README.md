@@ -44,6 +44,13 @@ cd ungoogled-chromium-macos
 PATH="/opt/homebrew/opt/python@3.13/libexec/bin:$PATH" ./build.sh
 ```
 
+Notes:
+
+- Homebrew deps: `python@3.13` (depot_tools needs ≤3.13 — the build calls a bare `python3`, hence the `PATH` prefix above), `ninja`, `coreutils` (for `greadlink`), `node`, and `perl` if you want a `.dmg`. Also run `xcodebuild -downloadComponent MetalToolchain` once, and keep Xcode open during the build.
+- Expect a multi-hour first build and ~150 GB of disk.
+- `scripts/sign-and-package.sh --dmg --install` then signs, notarizes, staples, installs to `/Applications` and builds the `.dmg`. It needs your own Developer ID certificate and a `notarytool` keychain profile; it never handles a password itself.
+- `scripts/update-tap.sh` points the Homebrew tap at a new release (verifies the dmg is notarized and the release asset is published before touching the cask).
+
 ## License
 
 BSD 3-Clause — see [LICENSE](LICENSE), which also carries the Chromium / ungoogled-chromium / Helium attributions.
