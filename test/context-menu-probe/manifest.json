@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "CtxMenu Probe (verification)",
+  "version": "1.0",
+  "description": "Tries to add right-click items to page/selection/link/image/tab/action. If the custom patch works, NONE of its 'TEST •' items should appear.",
+  "permissions": ["contextMenus"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "CtxMenu Probe" }
+}

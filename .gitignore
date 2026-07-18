@@ -1,0 +1,7 @@
+.DS_Store
+
+# Upstream build checkout (has its own .git; ~150GB after a build). Not tracked here.
+/ungoogled-chromium-macos/
+
+# Local working notes
+docs/

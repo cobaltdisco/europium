@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Right-click patch verification</title>
+<style>body{font:16px/1.6 -apple-system,system-ui;margin:40px;max-width:720px}
+kbd{background:#eee;border-radius:4px;padding:1px 6px}li{margin:.3em 0}</style>
+<h1>Right-click patch verification</h1>
+<p>Load the <code>context-menu-probe</code> extension alongside this page. It tries to register
+a menu item in every context an extension can target. If the patch works, <b>none</b> of its
+&ldquo;TEST&nbsp;&bull;&rdquo; items should ever appear.</p>
+<ol>
+  <li>Right-click this <b>paragraph</b> &rarr; no &ldquo;TEST &bull; page item&rdquo;.</li>
+  <li><b>Select this sentence</b>, then right-click &rarr; no &ldquo;TEST &bull; selection item&rdquo;.</li>
+  <li>Right-click this <a href="https://example.com">link</a> &rarr; no &ldquo;TEST &bull; link item&rdquo;.</li>
+  <li>Right-click the image below &rarr; no &ldquo;TEST &bull; image item&rdquo;.</li>
+  <li>Right-click a <b>browser tab</b> &rarr; no &ldquo;TEST &bull; tab item&rdquo;.</li>
+  <li>Pin the extension to the toolbar, then right-click <b>its icon</b> &rarr; &ldquo;TEST &bull; action item&rdquo;
+      <b>should still be there</b> (the patch deliberately keeps the action menu).</li>
+</ol>
+<img alt="test" width="120" height="80"
+  src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='80'%3E%3Crect width='120' height='80' fill='%234a90d9'/%3E%3Ctext x='60' y='45' fill='white' font-size='14' text-anchor='middle'%3Eright-click me%3C/text%3E%3C/svg%3E">
+<p style="color:#666">Control: the standard entries (Back / Reload / Inspect&hellip;) must still appear,
+and a PDF's &ldquo;Rotate&rdquo; entries must survive &mdash; proving only extension-contributed items were
+removed, with built-in menus untouched.</p>

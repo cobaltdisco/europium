@@ -1,0 +1,22 @@
+# Give Europium its own macOS profile directory (~/Library/Application Support/Europium).
+# Chromium reads the Info.plist key CrProductDirName and, when absent (it is never set in
+# open-source builds), falls back to the hardcoded "Chromium" — which collides with a stock
+# Chromium install's SingletonLock. Same fix Helium ships (helium-macos:
+# patches/helium/macos/change-product-dir-name.patch). Chromium 150.0.7871.46.
+--- a/chrome/common/chrome_paths_mac.mm
++++ b/chrome/common/chrome_paths_mac.mm
+@@ -32,13 +32,7 @@ char* ProductDirNameForBundle(NSBundle* chrome_bundle)
+     product_dir_name = [product_dir_name_ns fileSystemRepresentation];
+ 
+     if (!product_dir_name) {
+-#if BUILDFLAG(GOOGLE_CHROME_FOR_TESTING_BRANDING)
+-      product_dir_name = "Google/Chrome for Testing";
+-#elif BUILDFLAG(GOOGLE_CHROME_BRANDING)
+-      product_dir_name = "Google/Chrome";
+-#else
+-      product_dir_name = "Chromium";
+-#endif
++      product_dir_name = "Europium";
+     }
+ 
+     // Leaked, but the only caller initializes a static with this result, so it

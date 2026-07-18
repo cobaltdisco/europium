@@ -1,0 +1,68 @@
+# Let this fork also see native messaging hosts installed for a stock Chromium or
+# Google Chrome. Third-party apps (1Password, Dropbox, ...) drop their host manifests
+# into whichever of those profiles exists; since this build has its own profile dir
+# (macos-product-dir-name.patch) it would otherwise find none of them.
+# Read-only fallbacks. The two user-level lookups are gated on allow_user_level_hosts
+# exactly like the primary one; the system-wide Chrome dir is checked after the
+# system-wide Chromium dir, mirroring upstream's ordering. macOS only.
+# Chromium 150.0.7871.46.
+--- a/chrome/browser/extensions/api/messaging/launch_context_posix.cc
++++ b/chrome/browser/extensions/api/messaging/launch_context_posix.cc
+@@ -34,6 +34,27 @@ base::FilePath FindManifestInDir(int dir_key, const st
+   return base::FilePath();
+ }
+ 
++#if BUILDFLAG(IS_MAC)
++// ungoogled(custom): third-party apps (password managers, sync clients, ...)
++// install their native messaging host manifests into a stock Chromium or Google
++// Chrome profile directory. This build uses its own profile directory, so search
++// those as read-only secondary locations. `product_dir` is a relative path under
++// ~/Library/Application Support (e.g. "Chromium" or "Google/Chrome").
++base::FilePath FindManifestInProductDir(const base::FilePath::CharType* product_dir,
++                                        const std::string& host_name) {
++  base::FilePath app_data;
++  if (base::PathService::Get(base::DIR_APP_DATA, &app_data)) {
++    base::FilePath path = app_data.Append(product_dir)
++                              .Append(FILE_PATH_LITERAL("NativeMessagingHosts"))
++                              .Append(host_name + ".json");
++    if (base::PathExists(path)) {
++      return path;
++    }
++  }
++  return base::FilePath();
++}
++#endif  // BUILDFLAG(IS_MAC)
++
+ }  // namespace
+ 
+ // static
+@@ -43,10 +64,29 @@ base::FilePath LaunchContext::FindManifest(const std::
+   base::FilePath result;
+   if (allow_user_level_hosts) {
+     result = FindManifestInDir(chrome::DIR_USER_NATIVE_MESSAGING, host_name);
++#if BUILDFLAG(IS_MAC)
++    if (result.empty()) {
++      result = FindManifestInProductDir(FILE_PATH_LITERAL("Chromium"), host_name);
++    }
++    if (result.empty()) {
++      result = FindManifestInProductDir(FILE_PATH_LITERAL("Google/Chrome"),
++                                        host_name);
++    }
++#endif
+   }
+   if (result.empty()) {
+     result = FindManifestInDir(chrome::DIR_NATIVE_MESSAGING, host_name);
+   }
++#if BUILDFLAG(IS_MAC)
++  if (result.empty()) {
++    base::FilePath path =
++        base::FilePath(FILE_PATH_LITERAL("/Library/Google/Chrome/NativeMessagingHosts"))
++            .Append(host_name + ".json");
++    if (base::PathExists(path)) {
++      result = path;
++    }
++  }
++#endif
+ 
+   if (result.empty()) {
+     error_message = "Can't find native messaging host " + host_name;
