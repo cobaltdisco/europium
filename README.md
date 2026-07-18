@@ -1,8 +1,6 @@
 # Europium
 
-A macOS build of [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium) with one extra goal: **no browser extension can put items into your right-click menus.**
-
-Signed with a Developer ID certificate and notarized by Apple.
+A macOS build of [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium) with one extra goal: **No browser extension can put items into your right-click menus.**
 
 ## Install
 
@@ -31,11 +29,11 @@ All five are plain unified diffs against pristine Chromium source, in [`patches/
 
 ## Please read before using
 
-- **Apple Silicon only.** There is no Intel build; Homebrew refuses to install on Intel rather than give you an app that cannot run.
-- **No auto-updater.** Chromium's updater is disabled in ungoogled-chromium, so this build never updates itself. Updates arrive only when you run `brew upgrade --cask europium` (or download a new `.dmg`). **A browser you don't update is a security risk** — Chromium ships fixes for actively exploited bugs every few weeks.
-- **Update cadence.** Releases here follow [ungoogled-chromium-macos](https://github.com/ungoogled-software/ungoogled-chromium-macos), which normally lags Chrome stable. This release is built on Chromium `150.0.7871.46`.
+- **Apple Silicon only.** There is no Intel build.
+- **No auto-updater.** Chromium's updater is disabled in ungoogled-chromium, so this build never updates itself. Updates arrive only when you run `brew upgrade --cask europium` (or download a new `.dmg`).
+- **Update cadence.** Releases here follow [ungoogled-chromium-macos](https://github.com/ungoogled-software/ungoogled-chromium-macos), which normally lags Chrome stable.
 - **No DRM.** The Widevine CDM is not bundled, so Netflix/Spotify-style DRM playback won't work out of the box.
-- **Unofficial.** A personal build, not affiliated with, endorsed by, or sponsored by Google or the Chromium project. "Chromium" and the Chromium logo are trademarks of Google LLC.
+- **Unofficial.** A personal build, not affiliated with, endorsed by, or sponsored by Google or the Chromium project.
 
 ## Build it yourself
 
@@ -45,13 +43,6 @@ scripts/install-custom-patches.sh ungoogled-chromium-macos   # copy patches in +
 cd ungoogled-chromium-macos
 PATH="/opt/homebrew/opt/python@3.13/libexec/bin:$PATH" ./build.sh
 ```
-
-Notes:
-
-- Homebrew deps: `python@3.13` (depot_tools needs ≤3.13 — the build calls a bare `python3`, hence the `PATH` prefix above), `ninja`, `coreutils` (for `greadlink`), `node`, and `perl` if you want a `.dmg`. Also run `xcodebuild -downloadComponent MetalToolchain` once, and keep Xcode open during the build.
-- Expect a multi-hour first build and ~150 GB of disk.
-- `scripts/sign-and-package.sh --dmg --install` then signs, notarizes, staples, installs to `/Applications` and builds the `.dmg`. It needs your own Developer ID certificate and a `notarytool` keychain profile; it never handles a password itself.
-- `scripts/update-tap.sh` points the Homebrew tap at a new release (verifies the dmg is notarized and the release asset is published before touching the cask).
 
 ## License
 
