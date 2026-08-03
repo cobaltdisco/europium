@@ -41,12 +41,14 @@ All five are plain unified diffs against pristine Chromium source, in [`patches/
 git clone --recurse-submodules https://github.com/ungoogled-software/ungoogled-chromium-macos.git
 scripts/install-custom-patches.sh ungoogled-chromium-macos   # copy patches in + register in series
 scripts/pin-depot-tools.sh ungoogled-chromium-macos          # see the note below — currently required
+scripts/pin-rust-hash.sh ungoogled-chromium-macos            # adds the missing Rust checksum — see the note below
 cd ungoogled-chromium-macos
 PATH="/opt/homebrew/opt/python@3.13/libexec/bin:$PATH" ./build.sh
 ```
 
 Notes:
 
+- **`pin-rust-hash.sh` closes an upstream integrity gap.** ungoogled-chromium-macos pins checksums for its llvm and nodejs downloads but ships no hash for the ~200 MB Rust toolchain tarball, and the downloader silently skips verification for hashless entries. The script fetches the checksum Rust itself publishes for that exact file and writes it into the download manifest, so every build verifies the tarball. Re-run it after a fresh clone or an upstream Rust version bump.
 - **`pin-depot-tools.sh` is required right now, or the build fails before it compiles anything.** ungoogled-chromium fetches depot_tools from an unpinned `origin/main` and then patches it. depot_tools switched to ruff formatting on 2026-07-22, rewriting quotes and re-wrapping lines, so that patch no longer applies and every ungoogled-chromium build fails — whichever Chromium version you are building. The script pins depot_tools to the last commit before that reformat. Drop this step once upstream refreshes its `depot_tools.patch`.
 - Homebrew deps: `python@3.13` (depot_tools needs ≤3.13 — the build calls a bare `python3`, hence the `PATH` prefix above), `ninja`, `coreutils` (for `greadlink`), `node`, and `perl` if you want a `.dmg`. Also run `xcodebuild -downloadComponent MetalToolchain` once, and keep Xcode open during the build.
 - Expect a multi-hour first build and ~150 GB of disk.
