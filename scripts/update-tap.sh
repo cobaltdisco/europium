@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Point the Homebrew tap at a new Europium release.
 #
+# The cask itself lives ONLY in the tap repo (cobaltdisco/homebrew-europium,
+# Casks/europium.rb) — there is deliberately no copy in this repo, so it can
+# never drift out of date here.
+#
 # Run this AFTER `gh release create` has published the .dmg — it verifies the
 # release asset is actually reachable before touching the cask, so users never
 # see a cask whose url 404s.
