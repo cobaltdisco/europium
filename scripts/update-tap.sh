@@ -79,6 +79,14 @@ git -C "$TAP" push -q origin HEAD
 echo "==> Pushed. Users get it with: brew upgrade --cask europium"
 
 if command -v brew >/dev/null 2>&1; then
+  # Homebrew audits its OWN clone of the tap, not $TAP. Without this pull it
+  # would audit the previous version and report the stale cask as a mismatch
+  # against livecheck — a confusing false alarm that hides real problems.
+  BREW_TAP="$(brew --repo cobaltdisco/europium 2>/dev/null || true)"
+  if [ -n "$BREW_TAP" ] && [ -d "$BREW_TAP/.git" ]; then
+    echo "==> Syncing Homebrew's tap clone ($BREW_TAP)"
+    git -C "$BREW_TAP" pull -q --ff-only || echo "    (pull failed — audit may see a stale cask)"
+  fi
   echo "==> brew audit"
   brew audit --cask --online cobaltdisco/europium/europium || \
     echo "    (audit reported problems — fix before announcing)"
