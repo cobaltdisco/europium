@@ -23,7 +23,7 @@ Or grab the `.dmg` from [Releases](https://github.com/cobaltdisco/europium/relea
 | `macos-keychain-name` | Own Keychain item instead of sharing "Chromium Safe Storage". |
 | `macos-native-messaging-fallback` | Still finds native messaging hosts (1Password, Dropbox, …) that apps installed for Chromium or Google Chrome. |
 
-Everything else is stock ungoogled-chromium: no reskin, no relayout, no changed icon.
+Everything else is stock ungoogled-chromium: no reskin, no relayout, no changed icon. One build-config difference: PGO is enabled (see Notes under "Build it yourself").
 
 All five are plain unified diffs against pristine Chromium source, in [`patches/`](patches).
 
@@ -42,12 +42,14 @@ git clone --recurse-submodules https://github.com/ungoogled-software/ungoogled-c
 scripts/install-custom-patches.sh ungoogled-chromium-macos   # copy patches in + register in series
 scripts/pin-depot-tools.sh ungoogled-chromium-macos          # see the note below — currently required
 scripts/pin-rust-hash.sh ungoogled-chromium-macos            # adds the missing Rust checksum — see the note below
+scripts/pin-pgo-profile.sh ungoogled-chromium-macos          # enables PGO — see the note below
 cd ungoogled-chromium-macos
 PATH="/opt/homebrew/opt/python@3.13/libexec/bin:$PATH" ./build.sh
 ```
 
 Notes:
 
+- **`pin-pgo-profile.sh` re-enables profile-guided optimization**, which stock ungoogled-chromium turns off because its build refuses to fetch anything from Google. Official Chrome is compiled against a published profile of which code paths real browsing uses most (~5–10% on browser benchmarks); this script downloads the profile matching the exact Chromium version being built, verifies it against the checksum embedded in its filename, and points the build at it. Deliberate trade-off: this is one build-time download from a Google bucket, on the build machine only — the built browser still never talks to Google. Skip this script for a build with zero Google contact.
 - **`pin-rust-hash.sh` closes an upstream integrity gap.** ungoogled-chromium-macos pins checksums for its llvm and nodejs downloads but ships no hash for the ~200 MB Rust toolchain tarball, and the downloader silently skips verification for hashless entries. The script fetches the checksum Rust itself publishes for that exact file and writes it into the download manifest, so every build verifies the tarball. Re-run it after a fresh clone or an upstream Rust version bump.
 - **`pin-depot-tools.sh` is required right now, or the build fails before it compiles anything.** ungoogled-chromium fetches depot_tools from an unpinned `origin/main` and then patches it. depot_tools switched to ruff formatting on 2026-07-22, rewriting quotes and re-wrapping lines, so that patch no longer applies and every ungoogled-chromium build fails — whichever Chromium version you are building. The script pins depot_tools to the last commit before that reformat. Drop this step once upstream refreshes its `depot_tools.patch`.
 - Homebrew deps: `python@3.13` (depot_tools needs ≤3.13 — the build calls a bare `python3`, hence the `PATH` prefix above), `ninja`, `coreutils` (for `greadlink`), `node`, and `perl` if you want a `.dmg`. Also run `xcodebuild -downloadComponent MetalToolchain` once, and keep Xcode open during the build.
