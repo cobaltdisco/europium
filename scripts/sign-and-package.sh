@@ -65,9 +65,11 @@ sign "$BUNDLE_ID.framework.AlertNotificationService" \
                                       "$H/Europium Helper (Alerts).app"   --options restrict,library,runtime,kill
 sign app_mode_loader                  "$H/app_mode_loader"                --options restrict,library,runtime,kill
 sign web_app_shortcut_copier          "$H/web_app_shortcut_copier"        --options restrict,library,runtime,kill
-sign libEGL                           "$L/libEGL.dylib"
-sign libGLESv2                        "$L/libGLESv2.dylib"
-sign libvk_swiftshader                "$L/libvk_swiftshader.dylib"
+# Sign every dylib present rather than a fixed list — Chromium adds libraries
+# over time (151 brought libvulkan.dylib; notarization rejects any unsigned one).
+for dylib in "$L"/*.dylib; do
+  sign "$(basename "$dylib" .dylib)" "$dylib"
+done
 
 echo "==> Signing framework"
 sign "$BUNDLE_ID.framework" "$FW"
