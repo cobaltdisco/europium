@@ -1,0 +1,29 @@
+# Remove "Open in reading mode" and "Create QR Code for this Page" from the
+# page right-click menu. Same technique as disable-extension-context-menu-items:
+# each item has one dedicated append function; returning at the top removes the
+# item everywhere it would appear, with no other behavior change. The QR item
+# could also be hidden via the DesktopSharingHubEnabled policy, but that kills
+# the whole sharing hub; this removes only the menu item.
+
+--- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
++++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+@@ -2735,6 +2735,9 @@
+ }
+
+ void RenderViewContextMenu::AppendReadAnythingItem() {
++  // Europium: never offer reading mode in the context menu.
++  return;
++
+   const bool is_menu_simplification_enabled =
+       features::IsMenuSimplificationEnabled();
+   if (is_menu_simplification_enabled && params_.is_editable) {
+@@ -4545,6 +4548,9 @@
+     bool draw_icon,
+     bool add_separator,
+     bool ignore_simplification) {
++  // Europium: never offer QR code generation in the context menu.
++  return false;
++
+   if (features::IsMenuSimplificationEnabled() && !ignore_simplification) {
+     return false;
+   }

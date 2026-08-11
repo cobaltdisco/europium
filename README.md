@@ -22,10 +22,11 @@ Or grab the `.dmg` from [Releases](https://github.com/cobaltdisco/europium/relea
 | `macos-product-dir-name` | Own profile dir `~/Library/Application Support/Europium` — runs side by side with a stock Chromium install. |
 | `macos-keychain-name` | Own Keychain item instead of sharing "Chromium Safe Storage". |
 | `macos-native-messaging-fallback` | Still finds native messaging hosts (1Password, Dropbox, …) that apps installed for Chromium or Google Chrome. |
+| `remove-reading-mode-and-qrcode-menu-items` | Removes "Open in reading mode" and "Create QR Code for this Page" from the page right-click menu. The address-bar sharing hub is untouched. |
 
 Everything else is stock ungoogled-chromium: no reskin, no relayout, no changed icon. One build-config difference: PGO is enabled (see Notes under "Build it yourself").
 
-All five are plain unified diffs against pristine Chromium source, in [`patches/`](patches).
+All six are plain unified diffs against pristine Chromium source, in [`patches/`](patches).
 
 ## Please read before using
 
