@@ -42,7 +42,14 @@ rm -rf "$SRC/out"
 mkdir -p "$CACHE"
 
 echo "==> Fetching Chromium source (clone.py; depot_tools pinned via DEPS)"
-"$CLONE/retrieve_and_unpack_resource.sh" -g "$ARCH"
+# Call clone.py directly: the shell's retrieve_and_unpack_resource.sh was only
+# a thin wrapper around it, and upstream deleted/rewrote that wrapper in their
+# 152 update — going straight to the core utility survives such refactors.
+case "$ARCH" in
+  arm64) _clone_platform="mac-arm" ;;
+  *)     _clone_platform="mac" ;;
+esac
+python3 "$MAIN/utils/clone.py" -p "$_clone_platform" -o "$SRC"
 
 echo "==> Pruning binaries"
 python3 "$MAIN/utils/prune_binaries.py" "$SRC" "$MAIN/pruning.list"
