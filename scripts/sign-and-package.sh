@@ -45,6 +45,13 @@ done
 [ -d "$APP" ] || { echo "error: $APP not found (build first)" >&2; exit 1; }
 security find-identity -v -p codesigning | grep -q "$CODESIGN_ID" \
   || { echo "error: signing identity $CODESIGN_ID not found in keychain" >&2; exit 1; }
+# Preflight the notary credential BEFORE signing anything: the keychain item
+# has vanished twice (2026-08-29, 2026-09-04) and discovering that only after
+# ten minutes of codesign work wastes the whole run.
+if [ "$DO_NOTARIZE" = 1 ]; then
+  xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
+    || { echo "error: keychain profile '$NOTARY_PROFILE' not found (nothing signed yet). Run 'xcrun notarytool store-credentials' first (see header)." >&2; exit 1; }
+fi
 
 sign() {  # sign <identifier> <target> [extra codesign args...]
   local id="$1" target="$2"; shift 2
