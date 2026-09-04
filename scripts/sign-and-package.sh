@@ -58,6 +58,30 @@ sign() {  # sign <identifier> <target> [extra codesign args...]
   codesign --sign "$CODESIGN_ID" --force --timestamp --identifier "$id" "$@" "$target"
 }
 
+# notarize <file>: submit, then poll ourselves. `notarytool submit --wait` gives
+# up on a single transient HTTP timeout (2026-09-04: Apple had already Accepted
+# the dmg, the wait just lost the connection), which failed the whole run.
+notarize() {
+  local file="$1" id status
+  id="$(xcrun notarytool submit "$file" --keychain-profile "$NOTARY_PROFILE" --output-format json \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+  echo "    submission $id"
+  for _ in $(seq 1 120); do   # up to ~60 min
+    status="$(xcrun notarytool info "$id" --keychain-profile "$NOTARY_PROFILE" --output-format json 2>/dev/null \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)"
+    case "$status" in
+      Accepted) echo "    status: Accepted"; return 0 ;;
+      Invalid|Rejected)
+        echo "    status: $status — Apple's per-file findings:" >&2
+        xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" >&2 || true
+        return 1 ;;
+      *) sleep 30 ;;   # "In Progress", or an empty status from a transient API error — keep polling
+    esac
+  done
+  echo "error: notarization of $file not finished after 60 min (submission $id)" >&2
+  return 1
+}
+
 echo "==> Clearing extended attributes (avoids the incoming-connection prompt, uc-macos issue #17)"
 xattr -cs "$APP"
 
@@ -98,7 +122,7 @@ if [ "$DO_NOTARIZE" = 1 ]; then
     || { echo "error: keychain profile '$NOTARY_PROFILE' not found. Run 'xcrun notarytool store-credentials' first (see header)." >&2; exit 1; }
   ZIP="$OUT/notarize.zip"; rm -f "$ZIP"
   ditto -c -k --keepParent "$APP" "$ZIP"
-  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  notarize "$ZIP"
   xcrun stapler staple "$APP"
   rm -f "$ZIP"
   echo "==> Gatekeeper assessment after notarization:"
@@ -139,7 +163,7 @@ if [ "$DO_DMG" = 1 ]; then
   echo "==> Signing the disk image"
   codesign --sign "$CODESIGN_ID" --force --timestamp "$DMG"
   echo "==> Notarizing the disk image"
-  xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+  notarize "$DMG"
   xcrun stapler staple "$DMG"
   echo "==> Disk image assessment (as a downloader would see it):"
   spctl -a -t open --context context:primary-signature -v "$DMG"
