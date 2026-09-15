@@ -31,6 +31,7 @@ BUNDLE_ID="com.fx.europium"
 # Default to the SHA-1 of the newer one; override with EUROPIUM_CODESIGN_ID.
 CODESIGN_ID="${EUROPIUM_CODESIGN_ID:-F6177CCA4D281EB1BE7A01CBC3E6BFF67A899642}"
 NOTARY_PROFILE="${EUROPIUM_NOTARY_PROFILE:-europium-notary}"
+TEAM_ID="${EUROPIUM_TEAM_ID:-Z48W7TAXR4}"   # only used to verify every helper carries our signature
 
 DO_NOTARIZE=0; DO_DMG=0; DO_INSTALL=0
 for a in "$@"; do
@@ -94,12 +95,32 @@ sign "$BUNDLE_ID.helper.renderer"     "$H/Europium Helper (Renderer).app" --opti
 sign "$BUNDLE_ID.helper"              "$H/Europium Helper (GPU).app"      --options restrict,kill,runtime --entitlements "$ENT/helper-gpu-entitlements.plist"
 sign "$BUNDLE_ID.framework.AlertNotificationService" \
                                       "$H/Europium Helper (Alerts).app"   --options restrict,library,runtime,kill
+# Chromium 153 added the "Aperitif" helper family (chrome/BUILD.gn
+# content_mac_aperitif_helpers): same identifiers / options / entitlements as
+# their classic counterparts, per chrome/installer/mac/signing/parts.py.
+sign "$BUNDLE_ID.helper"              "$H/Europium Helper (Aperitif).app"          --options restrict,library,runtime,kill
+sign "$BUNDLE_ID.helper.renderer"     "$H/Europium Helper (Aperitif Renderer).app" --options restrict,kill,runtime --entitlements "$ENT/helper-renderer-entitlements.plist"
+sign "$BUNDLE_ID.helper"              "$H/Europium Helper (Aperitif GPU).app"      --options restrict,kill,runtime --entitlements "$ENT/helper-gpu-entitlements.plist"
+sign "$BUNDLE_ID.framework.AlertNotificationService" \
+                                      "$H/Europium Helper (Aperitif Alerts).app"   --options restrict,library,runtime,kill
 sign app_mode_loader                  "$H/app_mode_loader"                --options restrict,library,runtime,kill
 sign web_app_shortcut_copier          "$H/web_app_shortcut_copier"        --options restrict,library,runtime,kill
 # Sign every dylib present rather than a fixed list — Chromium adds libraries
 # over time (151 brought libvulkan.dylib; notarization rejects any unsigned one).
 for dylib in "$L"/*.dylib; do
   sign "$(basename "$dylib" .dylib)" "$dylib"
+done
+
+# Guard: every helper bundle must now carry our Developer ID signature. A new
+# helper Chromium adds later would otherwise stay ad-hoc and only surface as a
+# cryptic "code has no resources" error from codesign --verify (153 lesson).
+# (capture first: with pipefail, `codesign | grep -q` fails spuriously when
+# grep exits early and codesign takes SIGPIPE)
+for helper in "$H"/*.app; do
+  _sig="$(codesign -dv "$helper" 2>&1 || true)"
+  case "$_sig" in *"TeamIdentifier=$TEAM_ID"*) ;; *)
+    echo "error: $(basename "$helper") is not signed with team $TEAM_ID — add it to the helper list above" >&2; exit 1 ;;
+  esac
 done
 
 echo "==> Signing framework"
