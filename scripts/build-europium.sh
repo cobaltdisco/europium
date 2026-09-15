@@ -50,6 +50,13 @@ case "$ARCH" in
   *)     _clone_platform="mac" ;;
 esac
 python3 "$MAIN/utils/clone.py" -p "$_clone_platform" -o "$SRC"
+# When a DEPS entry disappears (153 dropped third_party/aria-practices), gclient
+# moves the stale checkout's .git aside as old_<path>.git in ITS cwd — which is
+# this repo's root. Pure leftover metadata; sweep it so it never lands in git status.
+for leftover in "$HERE"/old_*_build_src_*.git; do
+  [ -e "$leftover" ] || continue
+  echo "==> Removing gclient leftover $(basename "$leftover")"; rm -rf "$leftover"
+done
 
 echo "==> Pruning binaries"
 python3 "$MAIN/utils/prune_binaries.py" "$SRC" "$MAIN/pruning.list"
@@ -105,13 +112,43 @@ printf 'infra/3pp/tools/go/%s %s\n' "$_go_platform" "$_go_version" | \
   "$_cipd" ensure -cache-dir "$CACHE/cipd" \
     -root "$SRC/third_party/dawn/tools/golang/$_go_platform" -ensure-file -
 
+# Chromium 153 made the WebUI TypeScript compiler a prebuilt cipd package
+# (chromium/third_party/typescript/<platform>, see third_party/typescript/tsgo.gni)
+# that only gclient installs; ninja fails at once without lib/tsc. Install the
+# exact version DEPS pins, same mechanism as the Go step above. (Arch instead
+# patches tsgo off and uses a system tsc — more moving parts than one cipd pull.)
+_ts_platform="${_go_platform}"   # same mac-arm64 / mac-amd64 naming
+_ts_version="$(python3 - "$SRC/DEPS" "$_ts_platform" <<'PY'
+import re, sys
+deps = open(sys.argv[1]).read()
+m = re.search(r"'src/third_party/typescript/%s/src':\s*\{.*?'version':\s*'([^']+)'" % re.escape(sys.argv[2]), deps, re.S)
+print(m.group(1) if m else "")
+PY
+)"
+[ -n "$_ts_version" ] || { echo "error: typescript cipd version for $_ts_platform not found in DEPS" >&2; exit 1; }
+echo "==> TypeScript (tsc) for WebUI: $_ts_version"
+printf 'chromium/third_party/typescript/%s %s\n' "$_ts_platform" "$_ts_version" | \
+  "$_cipd" ensure -cache-dir "$CACHE/cipd" \
+    -root "$SRC/third_party/typescript/$_ts_platform/src" -ensure-file -
+[ -x "$SRC/third_party/typescript/$_ts_platform/src/lib/tsc" ] \
+  || { echo "error: tsc missing after cipd ensure" >&2; exit 1; }
+
 cd "$SRC"
 echo "==> Bootstrapping GN"
 ./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
 # NOTE: no build_bindgen.py — Google's rust package ships a prebuilt bindgen.
 
 echo "==> gn gen"
-./out/Default/gn gen out/Default --fail-on-unused-args
+# Chromium 153 pointed .gn's script_executable at a hermetic CPython that only
+# gclient installs (cipd infra/3pp/tools/cpython3 -> third_party/cpython3/host,
+# which ungoogled's pruning list deletes anyway). WHY not fetch it: every build
+# action already ran on the system python3 (python@3.13 via PATH above) through
+# 152, and Arch / ungoogled-chromium-windows both revert 153 to the system
+# interpreter with a patch. --script-executable does the same without a patch;
+# GN bakes it into the ninja files so actions use it too.
+_py3="$(command -v python3)"
+echo "==> script_executable: $_py3 ($("$_py3" --version 2>&1))"
+./out/Default/gn gen out/Default --fail-on-unused-args --script-executable="$_py3"
 
 echo "==> ninja"
 ninja -C out/Default chrome chromedriver
