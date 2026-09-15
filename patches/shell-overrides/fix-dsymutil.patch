@@ -1,0 +1,35 @@
+# Override of ungoogled-chromium-macos/patches/ungoogled-chromium/macos/fix-dsymutil.patch,
+# rebased for Chromium 153.0.8010.36 (upstream shell still targets 152 as of 2026-09-15).
+# WHY: 153 reformatted tools/mac/dump-static-initializers.py (ruff), so the first hunk's context
+# no longer matched. Same single substitution; the toolchain.gni hunk is unchanged.
+# Still required: is_official_build => enable_dsyms, and we do not fetch Google's dsymutil package.
+# base-sha256: 371494f85ddf3c7805c95e468902c481a20a57c6c7c98538e92a4f5c751ca417
+#   (SHA-256 of the upstream shell copy this override replaces; install-custom-patches.sh refuses to
+#   install over any other content, so an upstream change to this patch forces a re-review.)
+# DROP this file once the upstream shell ships an equivalent rebase (install-custom-patches.sh
+# copies it over the shell's copy; a missing target path there is a hard error).
+--- a/tools/mac/dump-static-initializers.py
++++ b/tools/mac/dump-static-initializers.py
+@@ -47,7 +47,7 @@
+     """
+ 
+     child = subprocess.Popen(
+-        ['tools/clang/dsymutil/bin/dsymutil', '-s', binary],
++        ['/usr/bin/dsymutil', '-s', binary],
+         stdout=subprocess.PIPE,
+     )
+     for line in child.stdout:
+--- a/build/toolchain/apple/toolchain.gni
++++ b/build/toolchain/apple/toolchain.gni
+@@ -236,8 +236,9 @@ template("single_apple_toolchain") {
+     if (_enable_dsyms) {
+       dsym_switch = " -Wcrl,dsym,{{root_out_dir}} "
+       dsym_switch += "-Wcrl,dsymutilpath," +
+-                     rebase_path("//tools/clang/dsymutil/bin/dsymutil",
+-                                 root_build_dir) + " "
++                     "/usr/bin/dsymutil "
++#                     rebase_path("//tools/clang/dsymutil/bin/dsymutil",
++#                                 root_build_dir) + " "
+ 
+       # All the toolchains are defined in the context of the default toolchain,
+       # this means that the global variable `current_cpu` is not correct, it
