@@ -97,6 +97,40 @@ echo "target_cpu = \"$ARCH\"" >> "$SRC/out/Default/args.gn"
 grep -q "^pgo_data_path=" "$SRC/out/Default/args.gn" \
   || { echo "error: pgo_data_path missing — run scripts/pin-pgo-profile.sh first" >&2; exit 1; }
 
+# Pin the macOS SDK to the exact version Chromium's own official builds use
+# (mac_sdk_official_version in build/config/mac/mac_sdk.gni). WHY: left alone,
+# gn takes whatever xcrun reports, i.e. the newest SDK inside Xcode.app. Xcode
+# 27.0 GM (installed 2026-09-15) ships an SDK whose .tbd stubs list the new
+# `arm64e.x1` target; 153's pinned lld (llvmorg-24-init-3796) predates LLVM's
+# support for it and rejects every stub as "malformed file ... unknown target",
+# so nothing links. The official version is what Google's bots build this
+# revision with, hence the one SDK known to match this toolchain. Xcode's SDK
+# dir is searched first, then the Command Line Tools' (Apple leaves older SDKs
+# there). No matching SDK installed -> keep the default and say so: newer SDKs
+# usually work, and did until Xcode 27.0 GM. GN insists the SDK path lie inside
+# the out dir (build/config/mac/BUILD.gn "sdk_inputs"), so hand it a symlink in
+# sdk/xcode_links/ exactly as sdk_info.py does for Xcode's own SDK. (find_sdk.py
+# still reports Xcode's newest version for DTSDKName in Info.plist; cosmetic,
+# compile and link use the pinned SDK.)
+_sdk_official="$(sed -n 's/^ *mac_sdk_official_version = "\([^"]*\)".*/\1/p' "$SRC/build/config/mac/mac_sdk.gni" | head -1)"
+[ -n "$_sdk_official" ] || { echo "error: mac_sdk_official_version not found in build/config/mac/mac_sdk.gni" >&2; exit 1; }
+_sdk_path=""
+for _d in "$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs" /Library/Developer/CommandLineTools/SDKs; do
+  for _s in "$_d"/MacOSX*.sdk; do
+    [ -d "$_s" ] || continue
+    [ "$(/usr/libexec/PlistBuddy -c 'Print Version' "$_s/SDKSettings.plist" 2>/dev/null)" = "$_sdk_official" ] || continue
+    _sdk_path="$(cd "$_s" && pwd -P)"; break 2
+  done
+done
+if [ -n "$_sdk_path" ]; then
+  echo "==> macOS SDK: $_sdk_official at $_sdk_path (Chromium's official SDK version)"
+  mkdir -p "$SRC/out/Default/sdk/xcode_links"
+  ln -sfn "$_sdk_path" "$SRC/out/Default/sdk/xcode_links/MacOSX${_sdk_official}.sdk"
+  echo "mac_sdk_path = \"//out/Default/sdk/xcode_links/MacOSX${_sdk_official}.sdk\"" >> "$SRC/out/Default/args.gn"
+else
+  echo "==> macOS SDK: no $_sdk_official SDK installed; using Xcode's default $(xcrun --show-sdk-version) (may be newer than this toolchain's lld understands)"
+fi
+
 # Dawn's Tint source generator needs a Go toolchain. Read the exact version
 # Dawn itself pins in its DEPS (never goes stale — Helium's technique).
 _cipd="$SRC/third_party/depot_tools/cipd"
