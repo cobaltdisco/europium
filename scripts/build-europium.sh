@@ -87,8 +87,39 @@ echo "==> Applying patches"
 python3 "$MAIN/utils/patches.py" apply "$SRC" "$MAIN/patches" "$CLONE/patches"
 
 echo "==> Domain substitution"
-python3 "$MAIN/utils/domain_substitution.py" apply -r "$MAIN/domain_regex.list" \
+# Exempt chromiumapp.org (D17, docs/08). WHY: rule 5 (chromium*.org) also
+# rewrites chrome.identity's redirect host <id>.chromiumapp.org into
+# <id>.ch40m1umapp.qjz9zk, a redirect_uri no OAuth server has registered, so
+# every extension's launchWebAuthFlow fails. The Claude extension keeps its
+# tokens in storage.session and silently re-authorizes this way after each
+# restart, so it was logged out after every Europium update. chromiumapp.org
+# is only a sentinel the browser intercepts, not a service we talk to. Same
+# fix as Helium 6af846d, with a narrower lookahead than its (?!app).
+# A patch can't do this: patches apply BEFORE substitution and would just be
+# re-substituted. Rewrite a copy (the core submodule stays clean) and demand
+# the upstream rule exactly once, so an upstream edit or fix of rule 5 stops
+# the build for re-review instead of silently shipping the old behaviour.
+_regex="$CLONE/build/domain_regex.europium.list"
+python3 - "$MAIN/domain_regex.list" "$_regex" <<'PY'
+import sys
+old = r'chromium([A-Za-z\-]*?\\*?)\.org#ch40m1um\g<1>.qjz9zk'
+new = r'chromium(?!app\\*?\.org)([A-Za-z\-]*?\\*?)\.org#ch40m1um\g<1>.qjz9zk'
+src, dst = sys.argv[1:]
+lines = open(src).read().split('\n')
+if lines.count(old) != 1:
+    sys.exit(f"error: expected rule {old!r} exactly once in {src}, found {lines.count(old)};"
+             " upstream changed it - re-review D17 (docs/08), then update or drop this override")
+open(dst, 'w').write('\n'.join(new if l == old else l for l in lines))
+PY
+python3 "$MAIN/utils/domain_substitution.py" apply -r "$_regex" \
   -f "$MAIN/domain_substitution.list" "$SRC"
+# Both halves of the redirect must agree: the renderer binding that hands the
+# URL to extensions, and the browser-side matcher that intercepts it.
+for f in chrome/renderer/resources/extensions/identity_custom_bindings.js \
+         chrome/browser/extensions/api/identity/identity_launch_web_auth_flow_function.cc; do
+  grep -q 'chromiumapp\.org' "$SRC/$f" && ! grep -q 'ch40m1umapp' "$SRC/$f" \
+    || { echo "error: $f does not use chromiumapp.org after substitution (D17)" >&2; exit 1; }
+done
 
 echo "==> GN args"
 mkdir -p "$SRC/out/Default"

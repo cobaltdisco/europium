@@ -28,6 +28,8 @@ Requires Apple Silicon and macOS 13 or newer (raised by Chromium 151); there is 
 | `macos-keychain-name` | Own Keychain item instead of sharing "Chromium Safe Storage" |
 | `macos-native-messaging-fallback` | Still finds native messaging hosts (1Password, Dropbox, …) that apps installed for Chromium or Google Chrome |
 
+Plus one build-time change: `chromiumapp.org` is exempt from ungoogled-chromium's domain substitution, so extensions' `chrome.identity` sign-in works (e.g. the Claude extension no longer signs out after every restart or update).
+
 ## License
 
 BSD 3-Clause — see [LICENSE](LICENSE), which also carries the Chromium / ungoogled-chromium / Helium attributions.
