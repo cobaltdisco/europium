@@ -46,12 +46,32 @@ done
 [ -d "$APP" ] || { echo "error: $APP not found (build first)" >&2; exit 1; }
 security find-identity -v -p codesigning | grep -q "$CODESIGN_ID" \
   || { echo "error: signing identity $CODESIGN_ID not found in keychain" >&2; exit 1; }
-# Preflight the notary credential BEFORE signing anything: the keychain item
-# has vanished twice (2026-08-29, 2026-09-04) and discovering that only after
-# ten minutes of codesign work wastes the whole run.
-if [ "$DO_NOTARIZE" = 1 ]; then
+screen_locked() {
+  ioreg -n Root -d1 -a | grep -q CGSSessionScreenIsLocked
+}
+
+# The notary profile lives in the data-protection keychain as a
+# when-unlocked item, so while the screen is locked secd refuses it
+# (-25308, "keychain is locked") and notarytool misreports that as
+# "No Keychain password item found". That — not a deleted credential — is
+# what the four "vanished" credentials (08-29, 09-04, 09-19, 09-27) were:
+# every one was a run started right after an unattended build, and the
+# 09-27 one is in the unified log. So wait for an unlock instead of failing,
+# and only call the profile missing when the screen is unlocked.
+require_notary_profile() {
+  if screen_locked; then
+    echo "==> Screen is locked; the notary credential is unreadable until it is unlocked. Waiting..."
+    while screen_locked; do sleep 30; done
+    echo "==> Unlocked, continuing."
+  fi
   xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
-    || { echo "error: keychain profile '$NOTARY_PROFILE' not found (nothing signed yet). Run 'xcrun notarytool store-credentials' first (see header)." >&2; exit 1; }
+    || { echo "error: keychain profile '$NOTARY_PROFILE' not found with the screen unlocked. Run 'xcrun notarytool store-credentials' first (see header)." >&2; exit 1; }
+}
+
+# Preflight the notary credential BEFORE signing anything: discovering a
+# problem only after ten minutes of codesign work wastes the whole run.
+if [ "$DO_NOTARIZE" = 1 ]; then
+  require_notary_profile
 fi
 
 sign() {  # sign <identifier> <target> [extra codesign args...]
@@ -64,10 +84,12 @@ sign() {  # sign <identifier> <target> [extra codesign args...]
 # the dmg, the wait just lost the connection), which failed the whole run.
 notarize() {
   local file="$1" id status
+  require_notary_profile   # the screen may have locked since the preflight
   id="$(xcrun notarytool submit "$file" --keychain-profile "$NOTARY_PROFILE" --output-format json \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
   echo "    submission $id"
-  for _ in $(seq 1 120); do   # up to ~60 min
+  for _ in $(seq 1 120); do   # up to ~60 min of unlocked polling
+    while screen_locked; do sleep 30; done   # credential unreadable; don't burn attempts
     status="$(xcrun notarytool info "$id" --keychain-profile "$NOTARY_PROFILE" --output-format json 2>/dev/null \
               | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)"
     case "$status" in
@@ -139,8 +161,6 @@ spctl --assess --type execute --verbose=4 "$APP" || echo "   (spctl will only pa
 
 if [ "$DO_NOTARIZE" = 1 ]; then
   echo "==> Notarizing (profile: $NOTARY_PROFILE)"
-  xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
-    || { echo "error: keychain profile '$NOTARY_PROFILE' not found. Run 'xcrun notarytool store-credentials' first (see header)." >&2; exit 1; }
   ZIP="$OUT/notarize.zip"; rm -f "$ZIP"
   ditto -c -k --keepParent "$APP" "$ZIP"
   notarize "$ZIP"
