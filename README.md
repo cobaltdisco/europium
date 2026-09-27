@@ -1,35 +1,43 @@
 # Europium
 
-A macOS build of [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium) with three main changes:
+A macOS build of [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium). Requires a Mac with Apple Silicon.
 
-- No browser extension can put items into your right-click context menu.
-- Remove "Open in reading mode" and "Create QR Code for this Page" from right-click context menu.
+## What's different
+
+- Extensions can't add items to the right-click menu.
+- "Open in reading mode" and "Create QR Code for this Page" are removed from the right-click menu.
+- Extensions that ask you to sign in, such as Claude, stay signed in after a restart. This doesn't work in ungoogled-chromium.
+- Europium keeps its own settings and data, so it can be installed alongside Chrome or Chromium.
 - PGO is enabled.
 
-## 1. How to install
+## Install
+
+With [Homebrew](https://brew.sh):
 
 ```bash
 brew tap cobaltdisco/europium
 brew install --cask europium
 ```
 
-Update later with `brew upgrade --cask europium`, or grab the `.dmg` from [Releases](https://github.com/cobaltdisco/europium/releases).
+To update later:
 
-Requires Apple Silicon and macOS 13 or newer (raised by Chromium 151); there is no Intel build.
+```bash
+brew upgrade --cask europium
+```
 
-## 2. Six patches
+Or download the `.dmg` from [Releases](https://github.com/cobaltdisco/europium/releases).
+
+## Patches
 
 | Patch | What it does |
 |---|---|
-| `disable-extension-context-menu-items` | Extensions can no longer add items to the page, tab-strip, or webview right-click menus |
-| `remove-reading-mode-and-qrcode-menu-items` | Removes "Open in reading mode" and "Create QR Code for this Page" |
-| `rebrand-europium` | Renames the product to Europium, bundle id `com.fx.europium` |
-| `macos-product-dir-name` | Own profile dir `~/Library/Application Support/Europium`, so it runs side by side with stock Chromium |
-| `macos-keychain-name` | Own Keychain item instead of sharing "Chromium Safe Storage" |
-| `macos-native-messaging-fallback` | Still finds native messaging hosts (1Password, Dropbox, …) that apps installed for Chromium or Google Chrome |
-
-Plus one build-time change: `chromiumapp.org` is exempt from ungoogled-chromium's domain substitution, so extensions' `chrome.identity` sign-in works (e.g. the Claude extension no longer signs out after every restart or update).
+| `disable-extension-context-menu-items` | Stops extensions from adding items to right-click menus |
+| `remove-reading-mode-and-qrcode-menu-items` | Removes the reading mode and QR code items from the right-click menu |
+| `rebrand-europium` | Changes the app name to Europium |
+| `macos-product-dir-name` | Stores settings and data in a separate folder from Chromium |
+| `macos-keychain-name` | Uses a separate Keychain entry from Chromium |
+| `macos-native-messaging-fallback` | Lets apps like 1Password connect to Europium the same way they connect to Chrome or Chromium |
 
 ## License
 
-BSD 3-Clause — see [LICENSE](LICENSE), which also carries the Chromium / ungoogled-chromium / Helium attributions.
+BSD 3-Clause. See [LICENSE](LICENSE) for details and attributions to Chromium, ungoogled-chromium, and Helium.
