@@ -167,6 +167,28 @@ printf 'chromium/third_party/typescript/%s %s\n' "$_ts_platform" "$_ts_version" 
 [ -x "$SRC/third_party/typescript/$_ts_platform/src/lib/tsc" ] \
   || { echo "error: tsc missing after cipd ensure" >&2; exit 1; }
 
+# Chromium 154: ungoogled's core dropped the hunk of build-with-wasm-rollup.patch
+# that swapped DevTools' esbuild bundler for rollup (devtools-frontend's
+# bundle.gni was rewritten), so ninja now needs the prebuilt esbuild binary
+# that devtools-frontend's own DEPS pins as a cipd package — gclient-only again,
+# and prune_binaries.py deletes it besides. Install the pinned version where
+# scripts/build/esbuild.js and bundle.gni expect it; it must match the
+# node_modules/esbuild JS package, which checks the binary's version.
+_esbuild_version="$(python3 - "$SRC/third_party/devtools-frontend/src/DEPS" <<'PY'
+import re, sys
+deps = open(sys.argv[1]).read()
+m = re.search(r"'third_party/esbuild':\s*\{.*?'version':\s*'([^']+)'", deps, re.S)
+print(m.group(1) if m else "")
+PY
+)"
+[ -n "$_esbuild_version" ] || { echo "error: esbuild cipd version not found in devtools-frontend DEPS" >&2; exit 1; }
+echo "==> esbuild for DevTools: $_esbuild_version"
+printf 'infra/3pp/tools/esbuild/%s %s\n' "$_go_platform" "$_esbuild_version" | \
+  "$_cipd" ensure -cache-dir "$CACHE/cipd" \
+    -root "$SRC/third_party/devtools-frontend/src/third_party/esbuild" -ensure-file -
+[ -x "$SRC/third_party/devtools-frontend/src/third_party/esbuild/esbuild" ] \
+  || { echo "error: esbuild missing after cipd ensure" >&2; exit 1; }
+
 cd "$SRC"
 echo "==> Bootstrapping GN"
 ./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
