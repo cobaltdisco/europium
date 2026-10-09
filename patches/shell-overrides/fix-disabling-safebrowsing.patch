@@ -1,5 +1,7 @@
 # Override of ungoogled-chromium-macos/patches/ungoogled-chromium/macos/fix-disabling-safebrowsing.patch,
-# rebased for Chromium 153.0.8010.36 (upstream shell still targets 152 as of 2026-09-15).
+# rebased for Chromium 153.0.8010.36 (upstream shell still targets 152 as of 2026-09-15);
+# chrome/test/BUILD.gn hunk re-anchored for 155.0.8059.39 on 2026-10-09 (155 reordered the Mac
+# unit_tests deps above it; it applied only with fuzz).
 # WHY: 153 itself removed most safe_browsing deps from static_library("ui") in chrome/browser/ui/BUILD.gn,
 # so that hunk shrinks to deleting the one remaining `//components/safe_browsing/content/browser` line
 # (plus `:buildflags` from ui_public_dependencies as before); the chrome/test/BUILD.gn hunk is a
@@ -124,9 +126,9 @@
      "//components/sync_user_events",
 --- a/chrome/test/BUILD.gn
 +++ b/chrome/test/BUILD.gn
-@@ -6049,8 +6049,6 @@
-       "//chrome/browser/renderer_host:history_swiper",
-       "//chrome/browser/renderer_host:history_swiping_control",
+@@ -5724,8 +5724,6 @@
+       "//chrome/browser/ui/cocoa:unit_tests",
+       "//chrome/browser/ui/cocoa/test:unit_tests",
        "//chrome/common/notifications",
 -      "//chrome/common/safe_browsing:archive_analyzer_results",
 -      "//chrome/common/safe_browsing:disk_image_type_sniffer_mac",
