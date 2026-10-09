@@ -91,6 +91,41 @@ if [ "$ARCH" = arm64 ] && [ -d third_party/node/mac/node-darwin-arm64 ]; then
   rm -rf third_party/node/mac_arm64/node-darwin-arm64
   mv third_party/node/mac/node-darwin-arm64 third_party/node/mac_arm64/
 fi
+# Chromium 155: V8's metagen action (v8_use_metagen_instance_types, on by
+# default) harvests instance types through libclang's Python bindings and
+# declares //third_party/llvm-libclang/{lib/libclang.dylib,bindings/python/
+# clang/*.py} as inputs. That package is a DEPS `gcs` dep, and ungoogled's
+# patched gclient skips gcs downloads, so ninja would stop on missing files.
+# Fetch the exact object DEPS pins for this host and verify its sha256 — same
+# bucket and trust as the clang package above. (Arch instead points
+# v8_metagen_libclang_* at a system libclang; turning metagen off would leave
+# Google's official build configuration.)
+case "$(uname -m)" in
+  arm64)  _gcs_dir="Mac_arm64" ;;
+  x86_64) _gcs_dir="Mac" ;;
+  *) echo "unsupported host: $(uname -m)" >&2; exit 1 ;;
+esac
+read -r _libclang_obj _libclang_sha < <(python3 - DEPS "$_gcs_dir" <<'PY'
+import re, sys
+deps, d = open(sys.argv[1]).read(), sys.argv[2]
+m = re.search(r"'src/third_party/llvm-libclang':\s*\{.*?\n  \},", deps, re.S)
+o = m and re.search(r"'object_name':\s*'(%s/[^']+)',\s*'sha256sum':\s*'([0-9a-f]{64})'" % re.escape(d), m.group(0))
+print(*(o.groups() if o else ()))
+PY
+)
+[ -n "${_libclang_sha:-}" ] || { echo "error: llvm-libclang $_gcs_dir object not found in DEPS" >&2; exit 1; }
+echo "==> libclang for V8 metagen: $_libclang_obj"
+_libclang_tar="$CACHE/$(basename "$_libclang_obj")"
+if [ ! -f "$_libclang_tar" ] || ! shasum -a 256 -c -s <<<"$_libclang_sha  $_libclang_tar"; then
+  curl -fsSL -o "$_libclang_tar.part" "https://storage.googleapis.com/chromium-browser-clang/$_libclang_obj"
+  shasum -a 256 -c -s <<<"$_libclang_sha  $_libclang_tar.part" \
+    || { rm -f "$_libclang_tar.part"; echo "error: llvm-libclang sha256 mismatch" >&2; exit 1; }
+  mv "$_libclang_tar.part" "$_libclang_tar"
+fi
+rm -rf third_party/llvm-libclang && mkdir -p third_party/llvm-libclang
+tar -xJf "$_libclang_tar" -C third_party/llvm-libclang
+[ -f third_party/llvm-libclang/lib/libclang.dylib ] && [ -f third_party/llvm-libclang/bindings/python/clang/cindex.py ] \
+  || { echo "error: llvm-libclang layout unexpected after extract" >&2; exit 1; }
 popd >/dev/null
 
 echo "==> Dropping the 9 vanilla-toolchain compat patches from series"
@@ -254,6 +289,18 @@ echo "==> gn gen"
 _py3="$(command -v python3)"
 echo "==> script_executable: $_py3 ($("$_py3" --version 2>&1))"
 ./out/Default/gn gen out/Default --fail-on-unused-args --script-executable="$_py3"
+
+# Chromium 155: V8's metagen action shells out to `gn desc` to recover
+# v8_base_without_compiler's compile flags. It looks for gn at
+# buildtools/mac/gn (the gclient-only cipd binary, absent here) and then on
+# PATH — where a Homebrew gn of another version, or none, would be found. And
+# `gn desc` re-evaluates the build files, so it needs the same
+# --script-executable as gen above or exec_script hits the missing hermetic
+# CPython. Install a wrapper at the official location that runs the gn we just
+# bootstrapped with that flag.
+mkdir -p buildtools/mac
+printf '#!/bin/sh\nexec %q "$@" --script-executable=%q\n' "$SRC/out/Default/gn" "$_py3" > buildtools/mac/gn
+chmod +x buildtools/mac/gn
 
 echo "==> ninja"
 ninja -C out/Default chrome chromedriver
