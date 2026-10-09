@@ -49,11 +49,29 @@ case "$ARCH" in
   arm64) _clone_platform="mac-arm" ;;
   *)     _clone_platform="mac" ;;
 esac
-python3 "$MAIN/utils/clone.py" -p "$_clone_platform" -o "$SRC"
+# Run from $CLONE with a RELATIVE output dir (as the core repo's own CI does:
+# `clone.py -o chromium_src`). WHY: depot_tools.patch rewrites DEPS'
+# gclient_gn_args_file "src/build/config/gclient_args.gni" by swapping "src"
+# for the -o value, and the depot_tools pinned by Chromium 155 rejects any
+# gclient_gn_args_file that is absolute ("Must be a relative path without '..'
+# traversal"). gclient's root is clone.py's cwd (GCLIENT_FILE is absolute), so
+# build/src from $CLONE resolves to the same $SRC as before.
+case "$SRC" in "$CLONE"/*) ;; *) echo "error: $SRC must lie inside $CLONE" >&2; exit 1 ;; esac
+# One-time migration: .gclient_entries written by the absolute-path runs is
+# keyed by absolute paths; with the new relative names gclient would treat every
+# old key as a removed dep and `sync -D` could delete the freshly synced
+# checkouts. It is only bookkeeping, so drop it when it is in the old form.
+_entries="$SRC/uc_staging/.gclient_entries"
+if [ -f "$_entries" ] && grep -q "^  '/" "$_entries"; then
+  echo "==> Dropping absolute-path .gclient_entries (one-time migration to relative clone path)"
+  rm -f "$_entries"
+fi
+(cd "$CLONE" && python3 "$MAIN/utils/clone.py" -p "$_clone_platform" -o "${SRC#"$CLONE"/}")
 # When a DEPS entry disappears (153 dropped third_party/aria-practices), gclient
-# moves the stale checkout's .git aside as old_<path>.git in ITS cwd — which is
-# this repo's root. Pure leftover metadata; sweep it so it never lands in git status.
-for leftover in "$HERE"/old_*_build_src_*.git; do
+# moves the stale checkout's .git aside as old_<path>.git in ITS cwd — this
+# repo's root before 155, $CLONE since. Pure leftover metadata; sweep it so it
+# never lands in git status.
+for leftover in "$HERE"/old_*build_src_*.git "$CLONE"/old_*build_src_*.git; do
   [ -e "$leftover" ] || continue
   echo "==> Removing gclient leftover $(basename "$leftover")"; rm -rf "$leftover"
 done
