@@ -1,10 +1,11 @@
 # Override of ungoogled-chromium-macos/patches/ungoogled-chromium/macos/fix-build-without-crubit.patch,
-# rebased for Chromium 155.0.8059.39 (upstream shell still targets 154 as of 2026-10-09).
-# WHY: 155 moved the Rust CBOR deps in source_set("unit_tests") into a two-entry list, so the
-# third hunk's context no longer matched. Same `!is_cronet_build` -> `enable_cpp_api_from_rust`
-# substitution at all three sites. On Google's toolchain enable_cpp_api_from_rust is true, so this
-# patch changes nothing for us; keep it only so the kept-patch set stays upstream's. Deliberately
-# NOT upstream's 154 version, which reverts Rust to C++ unconditionally (D18).
+# rebased for Chromium 156.0.8078.47 (upstream shell still targets 155 as of 2026-10-23).
+# WHY: 156 split components/cbor/BUILD.gn into cbor_headers / cbor_rust_impl / cbor, and the Rust
+# deps of the second site moved into cbor_rust_impl as `deps +=`, so the old context no longer
+# matched. Same `!is_cronet_build` -> `enable_cpp_api_from_rust` substitution at all three sites.
+# On Google's toolchain enable_cpp_api_from_rust is true, so this patch changes nothing for us;
+# keep it only so the kept-patch set stays upstream's. Deliberately NOT upstream's 154 version,
+# which reverts Rust to C++ unconditionally (D18).
 # base-sha256: c7e375f04941b33bc5c9cf03b7b6bf86dad9a2f9b5f6d012d45a1bd6dc3a49fa
 #   (SHA-256 of the upstream shell copy this override replaces; install-custom-patches.sh refuses to
 #   install over any other content, so an upstream change to this patch forces a re-review.)
@@ -19,17 +20,17 @@
 +  flags = [ "USE_CBOR_RUST=$enable_cpp_api_from_rust" ]
  }
  
- component("cbor") {
-@@ -35,7 +35,7 @@ component("cbor") {
+ source_set("cbor_headers") {
+@@ -48,7 +48,7 @@ source_set("cbor_rust_impl") {
      "//base",
    ]
  
 -  if (!is_cronet_build) {
 +  if (enable_cpp_api_from_rust) {
-     public_deps = [
+     deps += [
        "//build/rust/crubit",
        "//components/cbor/rust:cbor_rust_bindings",
-@@ -62,7 +62,7 @@ source_set("unit_tests") {
+@@ -91,7 +91,7 @@ source_set("unit_tests") {
      "//testing/gtest",
      "//third_party/fuzztest",
    ]
