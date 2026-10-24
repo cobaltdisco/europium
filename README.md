@@ -8,7 +8,7 @@ A macOS build of [ungoogled-chromium](https://github.com/ungoogled-software/ungo
 - "Open in reading mode" and "Create QR Code for this Page" are removed from the right-click menu.
 - Extensions that ask you to sign in, such as Claude, stay signed in after a restart. This doesn't work in ungoogled-chromium.
 - Europium keeps its own settings and data, so it can be installed alongside Chrome or Chromium.
-- Gets Google's certificate revocation list (CRLSet) and Certificate Transparency updates, which ungoogled-chromium turns off. Once an update arrives, certificates Chrome blocks in an emergency are blocked here too. These two are the only things Europium fetches from Google's update service (it checks update.googleapis.com and downloads from Google's download servers); no other components or extensions are updated.
+- Gets Google's certificate revocation list (CRLSet) and Certificate Transparency updates, which ungoogled-chromium turns off.
 - PGO is enabled.
 
 ## Install
