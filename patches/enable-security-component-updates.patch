@@ -1,0 +1,286 @@
+# Let back in exactly two component updates: CRLSet and PKI Metadata (D20, docs/09).
+# ungoogled-chromium blocks every update check (block-requests.patch's `return;` in
+# UpdateChecker), so Europium never receives Google's emergency certificate
+# revocations (CRLSet) and its built-in CT log list goes stale ~70 days after the
+# build, at which point CT enforcement silently switches off. The eMudhra
+# intermediate-CA compromise (2026-10-17) was blocked in Chrome only via CRLSet.
+# Scope: an allowlist of those two app IDs, enforced where requests go online
+# (scheduled check, on-demand update, and the update checker itself), so every
+# other component still registers and loads what is already on disk (e.g. a
+# manually installed Widevine) but never updates, and extension updates stay
+# blocked. HTTPS only: update check, override URL, download URLs, and HTTP
+# redirects upgraded. No event pings, no NSURLSession background downloader or
+# session (it bypasses the browser's proxy). The request carries no state read
+# from Google Chrome's side of the machine (Keystone/GoogleUpdater state, Chrome's
+# brand code) and no MDM/enterprise-managed flag (domainjoined).
+# The update URL itself is restored by an exemption in scripts/build-europium.sh:
+# a patch can't do it, because domain substitution runs after patching.
+# Chromium 156.0.8078.47.
+--- a/chrome/browser/component_updater/chrome_component_updater_configurator.cc
++++ b/chrome/browser/component_updater/chrome_component_updater_configurator.cc
+@@ -232,8 +232,11 @@
+ ChromeConfigurator::GetCrxDownloaderFactory() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   if (!crx_downloader_factory_) {
++    // Europium: no background downloader cache, so the macOS NSURLSession
++    // background session (which bypasses the browser's proxy) is never
++    // created. See ConfiguratorImpl::EnabledBackgroundDownloader().
+     crx_downloader_factory_ = update_client::MakeCrxDownloaderFactory(
+-        GetNetworkFetcherFactory(), GetBackgroundDownloaderCache());
++        GetNetworkFetcherFactory(), std::nullopt);
+   }
+   return crx_downloader_factory_;
+ }
+@@ -299,11 +302,9 @@
+ update_client::UpdaterStateProvider
+ ChromeConfigurator::GetUpdaterStateProvider() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+-  return base::BindRepeating(&UpdaterState::GetState);
+-#else
++  // Europium: don't report the state of Google's updater (Keystone /
++  // GoogleUpdater installed for Chrome) in component update requests.
+   return configurator_impl_.GetUpdaterStateProvider();
+-#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+ }
+ 
+ scoped_refptr<update_client::CrxCache> ChromeConfigurator::GetCrxCache() const {
+--- a/components/component_updater/component_updater_service.cc
++++ b/components/component_updater/component_updater_service.cc
+@@ -7,6 +7,7 @@
+ #include <stdint.h>
+ 
+ #include <algorithm>
++#include <iterator>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -38,6 +39,7 @@
+ #include "components/update_client/configurator.h"
+ #include "components/update_client/crx_cache.h"
+ #include "components/update_client/crx_update_item.h"
++#include "components/update_client/europium_allowed_components.h"
+ #include "components/update_client/update_client.h"
+ #include "components/update_client/update_client_errors.h"
+ #include "components/update_client/utils.h"
+@@ -332,7 +334,10 @@
+   crx.allow_updates_on_metered_connection =
+       component.allow_updates_on_metered_connection;
+ 
+-  crx.brand = brand_;
++  // Europium: no brand code. On macOS it is read from Google Chrome's own
++  // brand file (~/Library/Google/Google Chrome Brand.plist), so sending it
++  // would tell the server that Chrome is installed and how it was obtained.
++  crx.brand = std::string();
+   crx.crx_format_requirement =
+       crx_file::VerifierFormat::CRX3_WITH_PUBLISHER_PROOF;
+ 
+@@ -424,6 +429,18 @@
+   UMA_HISTOGRAM_ENUMERATION("ComponentUpdater.Calls", UPDATE_TYPE_MANUAL,
+                             UPDATE_TYPE_COUNT);
+ 
++  // Europium: only allowlisted security components go online. Other
++  // components still register and load whatever is already on disk (e.g. a
++  // manually installed Widevine), they just never update.
++  if (!update_client::IsEuropiumAllowedComponent(id)) {
++    if (!callback.is_null()) {
++      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++          FROM_HERE, base::BindOnce(std::move(callback),
++                                    update_client::Error::UPDATE_CANCELED));
++    }
++    return;
++  }
++
+   update_client_->Update(
+       {id},
+       base::BindOnce(&CrxUpdateService::GetCrxComponents,
+@@ -442,7 +459,15 @@
+   UMA_HISTOGRAM_ENUMERATION("ComponentUpdater.Calls", UPDATE_TYPE_AUTOMATIC,
+                             UPDATE_TYPE_COUNT);
+ 
+-  if (components_order_.empty()) {
++  // Europium: check only the allowlisted security components (see
++  // OnDemandUpdateInternal).
++  std::vector<std::string> ids_to_check;
++  std::ranges::copy_if(components_order_, std::back_inserter(ids_to_check),
++                       [](const std::string& id) {
++                         return update_client::IsEuropiumAllowedComponent(id);
++                       });
++
++  if (ids_to_check.empty()) {
+     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+         FROM_HERE, std::move(on_finished));
+     return true;
+@@ -451,7 +476,7 @@
+   config_->GetCrxCache()->RemoveIfNot(
+       components_order_,
+       base::BindOnce(
+-          &UpdateClient::Update, update_client_, components_order_,
++          &UpdateClient::Update, update_client_, std::move(ids_to_check),
+           base::BindOnce(&CrxUpdateService::GetCrxComponents,
+                          weak_ptr_factory_.GetWeakPtr()),
+           base::DoNothing(), false,
+--- a/components/component_updater/configurator_impl.cc
++++ b/components/component_updater/configurator_impl.cc
+@@ -76,12 +76,16 @@
+ 
+ std::vector<GURL> ConfiguratorImpl::UpdateUrl() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  // Europium: an override (--component-updater=url-source=) must be HTTPS too.
+   if (url_source_override_.is_valid()) {
++    if (!url_source_override_.SchemeIs(url::kHttpsScheme)) {
++      return {};
++    }
+     return {GURL(url_source_override_)};
+   }
+ 
+-  std::vector<GURL> urls{GURL(kUpdaterJSONDefaultUrl),
+-                         GURL(kUpdaterJSONFallbackUrl)};
++  // Europium: HTTPS only, no plain-HTTP fallback.
++  std::vector<GURL> urls{GURL(kUpdaterJSONDefaultUrl)};
+   if (require_encryption_) {
+     update_client::RemoveUnsecureUrls(&urls);
+   }
+@@ -91,7 +95,8 @@
+ 
+ std::vector<GURL> ConfiguratorImpl::PingUrl() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  return pings_enabled_ ? UpdateUrl() : std::vector<GURL>();
++  // Europium: never send install/update event pings.
++  return std::vector<GURL>();
+ }
+ 
+ const base::Version& ConfiguratorImpl::GetBrowserVersion() const {
+@@ -127,7 +132,10 @@
+ 
+ bool ConfiguratorImpl::EnabledBackgroundDownloader() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  return background_downloads_enabled_;
++  // Europium: the macOS background downloader goes through NSURLSession and
++  // so bypasses the browser's own proxy settings; keep downloads in the
++  // browser's network stack.
++  return false;
+ }
+ 
+ bool ConfiguratorImpl::EnabledCupSigning() const {
+@@ -163,11 +171,10 @@
+ 
+ std::optional<bool> ConfiguratorImpl::IsMachineExternallyManaged() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+-  return base::IsManagedOrEnterpriseDevice();
+-#else
++  // Europium: don't tell the update server whether this machine is
++  // MDM/enterprise managed; with no value, the "domainjoined" field is left
++  // out of the request.
+   return std::nullopt;
+-#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+ }
+ 
+ bool ConfiguratorImpl::IsConnectionMetered() const {
+--- a/components/update_client/BUILD.gn
++++ b/components/update_client/BUILD.gn
+@@ -155,6 +155,7 @@
+     "unpacker.cc",
+     "unpacker.h",
+     "unzipper.h",
++    "europium_allowed_components.h",
+     "update_checker.cc",
+     "update_checker.h",
+     "update_client.cc",
+--- a/components/update_client/net/network_impl.cc
++++ b/components/update_client/net/network_impl.cc
+@@ -129,6 +129,8 @@
+   resource_request->url = url;
+   resource_request->method = "POST";
+   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
++  // Europium: a redirect to plain HTTP is upgraded to HTTPS.
++  resource_request->upgrade_if_insecure = true;
+   resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+   for (const auto& [name, value] : post_additional_headers) {
+     resource_request->headers.SetHeader(name, value);
+@@ -190,6 +192,8 @@
+   resource_request->priority = net::LOW;
+ #endif
+   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
++  // Europium: a redirect to plain HTTP is upgraded to HTTPS.
++  resource_request->upgrade_if_insecure = true;
+   if (!cookie_predicate_.Run(url) ||
+       !network::IsUrlPotentiallyTrustworthy(url)) {
+     resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
+--- a/components/update_client/protocol_parser_json.cc
++++ b/components/update_client/protocol_parser_json.cc
+@@ -126,6 +126,11 @@
+       if (!gurl.is_valid()) {
+         return base::unexpected("operation contains a malformed url");
+       }
++      // Europium: download over HTTPS only. Payloads are signature-checked
++      // either way; this keeps what is downloaded hidden from the network.
++      if (!gurl.SchemeIs(url::kHttpsScheme)) {
++        continue;
++      }
+       op.urls.push_back(gurl);
+     }
+   }
+--- a/components/update_client/update_checker.cc
++++ b/components/update_client/update_checker.cc
+@@ -30,6 +30,7 @@
+ #include "components/update_client/cancellation.h"
+ #include "components/update_client/component.h"
+ #include "components/update_client/configurator.h"
++#include "components/update_client/europium_allowed_components.h"
+ #include "components/update_client/persisted_data.h"
+ #include "components/update_client/protocol_definition.h"
+ #include "components/update_client/protocol_handler.h"
+@@ -104,7 +105,16 @@
+     scoped_refptr<UpdateContext> context,
+     const base::flat_map<std::string, std::string>& additional_attributes,
+     UpdateCheckCallback update_check_callback) {
+-  return;
++  // ungoogled-chromium stops every update check here. Europium only lets
++  // through checks made up entirely of allowlisted security components, so
++  // extension updates and every other component stay blocked as before.
++  if (context->components_to_check_for_updates.empty() ||
++      !std::ranges::all_of(context->components_to_check_for_updates,
++                           [](const std::string& id) {
++                             return IsEuropiumAllowedComponent(id);
++                           })) {
++    return;
++  }
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+   update_check_callback_ = std::move(update_check_callback);
+--- /dev/null
++++ b/components/update_client/europium_allowed_components.h
+@@ -0,0 +1,31 @@
++// Copyright 2026 The Europium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef COMPONENTS_UPDATE_CLIENT_EUROPIUM_ALLOWED_COMPONENTS_H_
++#define COMPONENTS_UPDATE_CLIENT_EUROPIUM_ALLOWED_COMPONENTS_H_
++
++#include <algorithm>
++#include <array>
++#include <string_view>
++
++namespace update_client {
++
++// The only components Europium fetches from Google's component update
++// service. ungoogled-chromium turns component updates off entirely; that also
++// cuts off emergency certificate revocations and keeps the CT log list from
++// being refreshed, so these two are let back in. Everything else stays off.
++inline constexpr std::array<std::string_view, 2> kEuropiumAllowedComponents = {
++    "hfnkpimlhhgieaddgfemjhofmfblmnib",  // CRLSet: revoked certs and keys.
++    "efniojlnjndmcbiieegkicadnoecjjef",  // PKI Metadata: CT log list, Chrome
++                                         // Root Store, key pins.
++};
++
++inline bool IsEuropiumAllowedComponent(std::string_view app_id) {
++  return std::ranges::find(kEuropiumAllowedComponents, app_id) !=
++         kEuropiumAllowedComponents.end();
++}
++
++}  // namespace update_client
++
++#endif  // COMPONENTS_UPDATE_CLIENT_EUROPIUM_ALLOWED_COMPONENTS_H_

@@ -10,8 +10,8 @@
 # download Google's official prebuilt toolchain for the EXACT checked-out
 # revision — self-matching forever, zero compat patches (same move Helium
 # made). Trust trade-off accepted by PM 2026-08-29: toolchain now comes from
-# Google's bucket over TLS (like the PGO profile); the built browser still
-# never talks to Google.
+# Google's bucket over TLS (like the PGO profile). The built browser talks to
+# Google only for the two security components allowed by D20 (docs/09).
 #
 # Toolchain fetch runs on the PRISTINE tree (before domain substitution would
 # rewrite the download URLs inside those scripts) — same ordering as Helium.
@@ -140,7 +140,13 @@ echo "==> Applying patches"
 python3 "$MAIN/utils/patches.py" apply "$SRC" "$MAIN/patches" "$CLONE/patches"
 
 echo "==> Domain substitution"
-# Exempt chromiumapp.org (D17, docs/08). WHY: rule 5 (chromium*.org) also
+# Two exemptions, applied to a copy of the core's domain_regex.list (the core
+# submodule stays clean). A patch can't do either: patches apply BEFORE
+# substitution and would just be re-substituted. Each upstream rule must appear
+# exactly once, so an upstream edit or fix of it stops the build for re-review
+# instead of silently shipping the old behaviour.
+#
+# Rule 5 (chromium*.org) -> exempt chromiumapp.org (D17, docs/08). WHY: it also
 # rewrites chrome.identity's redirect host <id>.chromiumapp.org into
 # <id>.ch40m1umapp.qjz9zk, a redirect_uri no OAuth server has registered, so
 # every extension's launchWebAuthFlow fails. The Claude extension keeps its
@@ -148,31 +154,51 @@ echo "==> Domain substitution"
 # restart, so it was logged out after every Europium update. chromiumapp.org
 # is only a sentinel the browser intercepts, not a service we talk to. Same
 # fix as Helium 6af846d, with a narrower lookahead than its (?!app).
-# A patch can't do this: patches apply BEFORE substitution and would just be
-# re-substituted. Rewrite a copy (the core submodule stays clean) and demand
-# the upstream rule exactly once, so an upstream edit or fix of rule 5 stops
-# the build for re-review instead of silently shipping the old behaviour.
+#
+# Rule 2 (google*.com) -> exempt the component updater's endpoint
+# https://update.googleapis.com/ (D20, docs/09). WHY: Europium lets exactly two
+# components update again - CRLSet (Google's emergency certificate revocations)
+# and PKI Metadata (CT log list, Chrome Root Store) - see
+# patches/enable-security-component-updates.patch, which allowlists them. The
+# exemption only matches that URL written out with its scheme; in 156 that is
+# component_updater_url_constants.cc plus two files the macOS build doesn't
+# compile (activity_reporter, report_activity=false; and ash).
 _regex="$CLONE/build/domain_regex.europium.list"
 python3 - "$MAIN/domain_regex.list" "$_regex" <<'PY'
 import sys
-old = r'chromium([A-Za-z\-]*?\\*?)\.org#ch40m1um\g<1>.qjz9zk'
-new = r'chromium(?!app\\*?\.org)([A-Za-z\-]*?\\*?)\.org#ch40m1um\g<1>.qjz9zk'
+overrides = [
+    (r'chromium([A-Za-z\-]*?\\*?)\.org#ch40m1um\g<1>.qjz9zk',
+     r'chromium(?!app\\*?\.org)([A-Za-z\-]*?\\*?)\.org#ch40m1um\g<1>.qjz9zk',
+     'D17 (docs/08)'),
+    (r'google([A-Za-z\-]*?\\*?)\.com(?!mon)#9oo91e\g<1>.qjz9zk',
+     r'google(?!(?<=//update\.google)apis\.com/)([A-Za-z\-]*?\\*?)\.com(?!mon)#9oo91e\g<1>.qjz9zk',
+     'D20 (docs/09)'),
+]
 src, dst = sys.argv[1:]
 lines = open(src).read().split('\n')
-if lines.count(old) != 1:
-    sys.exit(f"error: expected rule {old!r} exactly once in {src}, found {lines.count(old)};"
-             " upstream changed it - re-review D17 (docs/08), then update or drop this override")
-open(dst, 'w').write('\n'.join(new if l == old else l for l in lines))
+for old, new, why in overrides:
+    if lines.count(old) != 1:
+        sys.exit(f"error: expected rule {old!r} exactly once in {src}, found {lines.count(old)};"
+                 f" upstream changed it - re-review {why}, then update or drop this override")
+    lines = [new if l == old else l for l in lines]
+open(dst, 'w').write('\n'.join(lines))
 PY
 python3 "$MAIN/utils/domain_substitution.py" apply -r "$_regex" \
   -f "$MAIN/domain_substitution.list" "$SRC"
-# Both halves of the redirect must agree: the renderer binding that hands the
-# URL to extensions, and the browser-side matcher that intercepts it.
+# D17: both halves of the redirect must agree: the renderer binding that hands
+# the URL to extensions, and the browser-side matcher that intercepts it.
 for f in chrome/renderer/resources/extensions/identity_custom_bindings.js \
          chrome/browser/extensions/api/identity/identity_launch_web_auth_flow_function.cc; do
   grep -q 'chromiumapp\.org' "$SRC/$f" && ! grep -q 'ch40m1umapp' "$SRC/$f" \
     || { echo "error: $f does not use chromiumapp.org after substitution (D17)" >&2; exit 1; }
 done
+# D20: the component updater must point at the real endpoint, and the
+# allowlist patch must be in the tree (without it the exemption would be inert,
+# with it but without the exemption the updater would talk to a dead host).
+grep -q '"https://update\.googleapis\.com/service/update2/json"' \
+    "$SRC/components/component_updater/component_updater_url_constants.cc" \
+  && [ -f "$SRC/components/update_client/europium_allowed_components.h" ] \
+  || { echo "error: component updater URL or allowlist missing after substitution (D20)" >&2; exit 1; }
 
 echo "==> GN args"
 mkdir -p "$SRC/out/Default"
