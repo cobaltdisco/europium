@@ -7,17 +7,17 @@
 
 --- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
 +++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
-@@ -2735,6 +2735,9 @@
+@@ -2864,6 +2864,9 @@
  }
-
+ 
  void RenderViewContextMenu::AppendReadAnythingItem() {
 +  // Europium: never offer reading mode in the context menu.
 +  return;
 +
-   const bool is_menu_simplification_enabled =
-       features::IsMenuSimplificationEnabled();
-   if (is_menu_simplification_enabled && params_.is_editable) {
-@@ -4545,6 +4548,9 @@
+   if (menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE)
+           .has_value()) {
+     return;
+@@ -4749,6 +4752,9 @@
      bool draw_icon,
      bool add_separator,
      bool ignore_simplification) {
