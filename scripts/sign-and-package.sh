@@ -44,6 +44,18 @@ for a in "$@"; do
 done
 
 [ -d "$APP" ] || { echo "error: $APP not found (build first)" >&2; exit 1; }
+
+# macOS records privacy permissions such as Local Network access under the
+# CFBundleIdentifier, but checks them against the code signing identifier; if
+# the two differ the permission never takes effect (uc-macos issue #361).
+# BUNDLE_ID is hardcoded above and MAC_BUNDLE_ID lives in rebrand-europium.patch,
+# so refuse to sign when they have drifted apart.
+plist_bundle_id() {  # plist_bundle_id <Info.plist>
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$1"
+}
+_app_bid="$(plist_bundle_id "$APP/Contents/Info.plist")"
+[ "$_app_bid" = "$BUNDLE_ID" ] \
+  || { echo "error: Europium.app's CFBundleIdentifier is $_app_bid, but this script signs as $BUNDLE_ID" >&2; exit 1; }
 security find-identity -v -p codesigning | grep -q "$CODESIGN_ID" \
   || { echo "error: signing identity $CODESIGN_ID not found in keychain" >&2; exit 1; }
 screen_locked() {
@@ -157,6 +169,32 @@ codesign --sign "$CODESIGN_ID" --force --timestamp --identifier "$BUNDLE_ID" \
 
 echo "==> Verifying"
 codesign --verify --deep --strict --verbose=2 "$APP"
+
+# Every bundle must be signed with its own CFBundleIdentifier (see #361 above).
+# A helper Chromium adds or renames later would otherwise be signed with a
+# stale identifier from the list above and silently break its permissions.
+verify_identifier() {  # verify_identifier <bundle> <Info.plist>
+  local bundle="$1" bid sid sig
+  # PlistBuddy prints its errors to stdout, so check the exit status explicitly
+  # (set -e does not apply inside a function called from `||`).
+  if ! bid="$(plist_bundle_id "$2" 2>/dev/null)" || [ -z "$bid" ]; then
+    echo "error: cannot read CFBundleIdentifier from $2" >&2
+    return 1
+  fi
+  sig="$(codesign -dv "$bundle" 2>&1 || true)"   # capture first (pipefail + SIGPIPE, see above)
+  sid="$(printf '%s\n' "$sig" | sed -n 's/^Identifier=//p')"
+  if [ "$sid" != "$bid" ]; then
+    echo "error: $(basename "$bundle") is signed as '$sid' but its CFBundleIdentifier is '$bid'" >&2
+    return 1
+  fi
+}
+_id_ok=1
+for _bundle in "$APP" "$H"/*.app; do
+  verify_identifier "$_bundle" "$_bundle/Contents/Info.plist" || _id_ok=0
+done
+verify_identifier "$FW" "$FW/Resources/Info.plist" || _id_ok=0
+[ "$_id_ok" = 1 ] || exit 1
+echo "    signing identifiers match CFBundleIdentifier for the app, framework and every helper"
 spctl --assess --type execute --verbose=4 "$APP" || echo "   (spctl will only pass once the app is notarized)"
 
 if [ "$DO_NOTARIZE" = 1 ]; then
