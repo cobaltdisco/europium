@@ -9,6 +9,10 @@
 # base-sha256: fa948939054744392880bfedf5208dc9031025667ac4a156a88405cedb56d5dd
 #   (SHA-256 of the upstream shell copy this override replaces; install-custom-patches.sh refuses to
 #   install over any other content, so an upstream change to this patch forces a re-review.)
+# 157.0.8103.38 (2026-11-05): dropped three segments Chromium made moot -- ui/BUILD.gn no longer lists
+# //components/safe_browsing/content/browser, chrome/test/BUILD.gn no longer lists the two Mac
+# safe_browsing unit-test deps, and the policy-list entries lost their ENTERPRISE_CLIENT_CERTIFICATES
+# guard (flag removed; prefs.h now included unconditionally and used by two new unpatched entries).
 # DROP this file once the upstream shell ships an equivalent rebase.
 # Fix GN safe_browsing and building with safebrowsing disabled on macOS
 
@@ -45,31 +49,6 @@
    if (safe_browsing_mode == 1) {
      sources += [
        "obfuscated_archive_analysis_delegate.cc",
---- a/chrome/browser/policy/configuration_policy_handler_list_factory.cc
-+++ b/chrome/browser/policy/configuration_policy_handler_list_factory.cc
-@@ -2466,22 +2466,6 @@ const PolicyToPreferenceMapEntry kSimple
-     base::Value::Type::BOOLEAN },
- #endif
- 
--// The per-user policy is available on ChromeOS (declared `future_on:
--// chrome_os`), but the per-browser policy is not (it is `chrome.*`, i.e.
--// win/mac/linux only). As a result the per-browser `key::` constant is only
--// generated in non-ChromeOS builds, so its entry must be guarded accordingly.
--#if BUILDFLAG(ENTERPRISE_CLIENT_CERTIFICATES)
--  { key::kProvisionManagedClientCertificateForUser,
--    client_certificates::prefs::kProvisionManagedClientCertificateForUserPrefs,
--    base::Value::Type::INTEGER },
--#endif  // BUILDFLAG(ENTERPRISE_CLIENT_CERTIFICATES)
--
--#if BUILDFLAG(ENTERPRISE_CLIENT_CERTIFICATES) && !BUILDFLAG(IS_CHROMEOS)
--  { key::kProvisionManagedClientCertificateForBrowser,
--    client_certificates::prefs::kProvisionManagedClientCertificateForBrowserPrefs,
--    base::Value::Type::INTEGER },
--#endif  // BUILDFLAG(ENTERPRISE_CLIENT_CERTIFICATES) && !BUILDFLAG(IS_CHROMEOS)
--
- #if BUILDFLAG(IS_CHROMEOS)
-   { key::kDeviceAuthenticationFlowAutoReloadInterval,
-     ash::prefs::kAuthenticationFlowAutoReloadInterval,
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
 @@ -8360,33 +8360,6 @@ bool ChromeContentBrowserClient::SetupEm
@@ -108,14 +87,6 @@
    return false;
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
-@@ -811,7 +811,6 @@
-     "//components/policy/core/browser",
-     "//components/qr_code_generator:bitmap_generator",
-     "//components/resources",
--    "//components/safe_browsing/content/browser",
-     "//components/search_engines",
-     "//components/security_interstitials/content:security_interstitial_page",
-     "//components/signin/public/identity_manager",
 @@ -3709,7 +3708,6 @@
      "//components/dom_distiller/core",
      "//components/enterprise/buildflags",
@@ -124,14 +95,3 @@
      "//components/segmentation_platform/public",
      "//components/sync",
      "//components/sync_user_events",
---- a/chrome/test/BUILD.gn
-+++ b/chrome/test/BUILD.gn
-@@ -5724,8 +5724,6 @@
-       "//chrome/browser/ui/cocoa:unit_tests",
-       "//chrome/browser/ui/cocoa/test:unit_tests",
-       "//chrome/common/notifications",
--      "//chrome/common/safe_browsing:archive_analyzer_results",
--      "//chrome/common/safe_browsing:disk_image_type_sniffer_mac",
-       "//chrome/services/mac_notifications:unit_tests",
-       "//chrome/services/mac_notifications/public/mojom",
-       "//chrome/utility/safe_browsing",

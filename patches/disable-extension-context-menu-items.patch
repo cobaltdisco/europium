@@ -2,10 +2,11 @@
 # menus, but KEEP them on the extension's own action (toolbar-icon) menu.
 # Single chokepoint: every desktop right-click surface funnels through
 # ContextMenuMatcher::AppendExtensionItems, so one guard covers them all.
-# Authored against Chromium 150.0.7871.46.
+# Authored against Chromium 150.0.7871.46; re-anchored for 157.0.8103.38
+# (157 turned the DCHECK_GE context line into CHECK_GE(..., NotFatalUntil::M161)).
 --- a/chrome/browser/extensions/context_menu_matcher.cc
 +++ b/chrome/browser/extensions/context_menu_matcher.cc
-@@ -67,6 +67,10 @@ void ContextMenuMatcher::AppendExtensionItems(
+@@ -71,6 +71,10 @@ void ContextMenuMatcher::AppendExtensionItems(
      int* index,
      bool is_action_menu,
      const std::u16string& group_title) {
@@ -13,6 +14,6 @@
 +  // webview menus, but keep them on the extension's own action (toolbar-icon) menu.
 +  if (!is_action_menu)
 +    return;
-   DCHECK_GE(*index, 0);
+   CHECK_GE(*index, 0, base::NotFatalUntil::M161);
    int max_index =
        extensions_context_custom_last - extensions_context_custom_first;
