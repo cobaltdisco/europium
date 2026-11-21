@@ -13,6 +13,9 @@
 # //components/safe_browsing/content/browser, chrome/test/BUILD.gn no longer lists the two Mac
 # safe_browsing unit-test deps, and the policy-list entries lost their ENTERPRISE_CLIENT_CERTIFICATES
 # guard (flag removed; prefs.h now included unconditionally and used by two new unpatched entries).
+# 158.0.8127.36 (2026-11-21): dropped the ui/BUILD.gn segment -- Chromium 158 deleted both
+# group("ui_public_dependencies") and group("browser_public_dependencies"), so the
+# //components/safe_browsing:buildflags public dep it removed no longer exists anywhere in that file.
 # DROP this file once the upstream shell ships an equivalent rebase.
 # Fix GN safe_browsing and building with safebrowsing disabled on macOS
 
@@ -85,13 +88,3 @@
    }
  
    return false;
---- a/chrome/browser/ui/BUILD.gn
-+++ b/chrome/browser/ui/BUILD.gn
-@@ -3709,7 +3708,6 @@
-     "//components/dom_distiller/core",
-     "//components/enterprise/buildflags",
-     "//components/paint_preview/buildflags",
--    "//components/safe_browsing:buildflags",
-     "//components/segmentation_platform/public",
-     "//components/sync",
-     "//components/sync_user_events",
