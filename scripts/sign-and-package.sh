@@ -117,6 +117,78 @@ notarize() {
   return 1
 }
 
+# package_dmg <app> <dmg>: build the disk image users download.
+#
+# Chromium's pkg-dmg builds the image with `hdiutil makehybrid -hfs`, which
+# stamps Finder information on every file. The copy a user drags out of the
+# image then fails `codesign --verify --strict` ("resource fork, Finder
+# information, or similar detritus not allowed"), although Gatekeeper accepts
+# it. Every release from 150 through 158.0.8127.36 shipped that way.
+# `diskutil image create from` writes no such attributes. It produces an APFS
+# image; ULMO (lzma) is about 17% smaller than the bzip2 image it replaces and
+# mounts on macOS 10.15+, older than anything Chromium still supports.
+package_dmg() {
+  local app="$1" dmg="$2" rc=0
+  _dmg_stage="$(mktemp -d "$(dirname "$dmg")/dmg-stage.XXXXXX")"
+  ditto "$app" "$_dmg_stage/Europium.app" \
+    && ln -s /Applications "$_dmg_stage/Applications" \
+    && rm -f "$dmg" \
+    && diskutil image create from --format ULMO --volumeName Europium "$_dmg_stage" "$dmg" \
+    || rc=$?
+  rm -rf "$_dmg_stage"; _dmg_stage=""
+  return "$rc"
+}
+
+# eject_image <mount point>: detach a mounted image, retrying while something
+# (Spotlight, a virus scanner) still holds the volume busy.
+eject_image() {
+  local mp="$1"
+  for _ in 1 2 3 4 5; do
+    if diskutil eject "$mp" >/dev/null 2>&1; then
+      rmdir "$mp" 2>/dev/null || true
+      return 0
+    fi
+    sleep 2
+  done
+  echo "warning: the disk image at $mp is still mounted; eject it with: diskutil eject '$mp'" >&2
+  return 1
+}
+
+# The staging copy is ~500 MB and the verification mount is invisible in
+# Finder, so neither may outlive the script, including on Ctrl-C or an error.
+_dmg_stage=""; _dmg_mount=""
+dmg_cleanup() {
+  if [ -n "$_dmg_mount" ]; then eject_image "$_dmg_mount" || true; _dmg_mount=""; fi
+  if [ -n "$_dmg_stage" ]; then rm -rf "$_dmg_stage"; _dmg_stage=""; fi
+}
+trap dmg_cleanup EXIT
+
+# verify_dmg <dmg> <version>: check the app inside the image, which is the copy
+# users actually install. The checks earlier in this script only ever saw the
+# build directory, which is how the pkg-dmg problem above went unnoticed.
+verify_dmg() {
+  local dmg="$1" want="$2" mp app got rc=0
+  mp="$(mktemp -d)"
+  diskutil image attach --readOnly --nobrowse --mountPoint "$mp" "$dmg" >/dev/null \
+    || { rmdir "$mp"; echo "error: cannot mount $dmg" >&2; return 1; }
+  _dmg_mount="$mp"
+  app="$mp/Europium.app"
+  codesign --verify --deep --strict "$app" \
+    || { echo "error: the app inside the disk image fails strict signature verification" >&2; rc=1; }
+  spctl --assess --type execute "$app" \
+    || { echo "error: Gatekeeper rejects the app inside the disk image" >&2; rc=1; }
+  xcrun stapler validate -q "$app" \
+    || { echo "error: the app inside the disk image has no valid notarization ticket" >&2; rc=1; }
+  got="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || true)"
+  [ "$got" = "$want" ] \
+    || { echo "error: the app inside the disk image is version '$got', expected '$want'" >&2; rc=1; }
+  [ "$(readlink "$mp/Applications" 2>/dev/null)" = /Applications ] \
+    || { echo "error: the disk image has no Applications shortcut" >&2; rc=1; }
+  eject_image "$mp" || true   # a stuck mount is reported, but says nothing about the image
+  _dmg_mount=""
+  return "$rc"
+}
+
 echo "==> Clearing extended attributes (avoids the incoming-connection prompt, uc-macos issue #17)"
 xattr -cs "$APP"
 
@@ -197,6 +269,13 @@ verify_identifier "$FW" "$FW/Resources/Info.plist" || _id_ok=0
 echo "    signing identifiers match CFBundleIdentifier for the app, framework and every helper"
 spctl --assess --type execute --verbose=4 "$APP" || echo "   (spctl will only pass once the app is notarized)"
 
+# Start the signed app before spending a notarization on it: a build that
+# crashes on launch, or one where MV2 extensions stopped working, passes every
+# check above. EUROPIUM_SKIP_SMOKE=1 skips it (e.g. no network stack to bind).
+if [ "${EUROPIUM_SKIP_SMOKE:-0}" != 1 ]; then
+  "$HERE/scripts/smoke-test.sh" "$APP"
+fi
+
 if [ "$DO_NOTARIZE" = 1 ]; then
   echo "==> Notarizing (profile: $NOTARY_PROFILE)"
   ZIP="$OUT/notarize.zip"; rm -f "$ZIP"
@@ -231,11 +310,7 @@ if [ "$DO_DMG" = 1 ]; then
   ER="${EUROPIUM_REVISION:-1}"
   DMG="$CLONE/build/europium_${V}-${UR}.${PR}.${ER}_macos.dmg"
   echo "==> Packaging $DMG"
-  rm -f "$DMG"
-  ( cd "$SRC" && chrome/installer/mac/pkg-dmg \
-      --sourcefile --source "$APP" --target "$DMG" \
-      --volname Europium --symlink /Applications:/Applications \
-      --format UDBZ --verbosity 2 )
+  package_dmg "$APP" "$DMG"
 
   # The .app inside is already notarized+stapled, but the disk image itself must
   # also be signed and notarized or Gatekeeper rejects it on download.
@@ -246,6 +321,15 @@ if [ "$DO_DMG" = 1 ]; then
   xcrun stapler staple "$DMG"
   echo "==> Disk image assessment (as a downloader would see it):"
   spctl -a -t open --context context:primary-signature -v "$DMG"
+  echo "==> Checking the app inside the disk image:"
+  if ! verify_dmg "$DMG" "$V"; then
+    # Take the bad image out of the way: it is signed and notarized, and
+    # update-tap.sh would otherwise pick it up as the newest .dmg.
+    mv "$DMG" "$DMG.failed-verification"
+    echo "error: the disk image failed verification; kept as $DMG.failed-verification" >&2
+    exit 1
+  fi
+  echo "    signature, Gatekeeper, notarization ticket and version all good"
   echo "    -> $DMG"
 fi
 

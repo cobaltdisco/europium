@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>smoke: running</title>
+<!-- Loaded by scripts/smoke-test.sh, which reads the result from the page title.
+     blockme.txt must be cancelled by test/mv2-probe; allowed.txt must load. -->
+<script>
+// A cancelled request rejects the fetch; a request that reached the server
+// resolves, whatever its status. Only a rejection counts as "blocked", so a
+// missing blockme.txt (404) cannot pass for a working listener.
+const outcome = (url) => fetch(url, { cache: "no-store" }).then(
+  (response) => (response.ok ? "loaded" : `http${response.status}`),
+  () => "blocked");
+Promise.all([outcome("blockme.txt"), outcome("allowed.txt")]).then(([blockme, allowed]) => {
+  document.title = `smoke: blockme=${blockme} allowed=${allowed}`;
+});
+</script>
